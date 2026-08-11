@@ -1,0 +1,35 @@
+/** Lint config for the buildless ES-module sources. */
+export default [
+  {
+    files: ['js/**/*.js', 'test/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly', document: 'readonly', navigator: 'readonly',
+        location: 'readonly', history: 'readonly', console: 'readonly',
+        fetch: 'readonly', URL: 'readonly', URLSearchParams: 'readonly',
+        Blob: 'readonly', File: 'readonly', FileReader: 'readonly',
+        setTimeout: 'readonly', clearTimeout: 'readonly', setInterval: 'readonly',
+        requestAnimationFrame: 'readonly', ResizeObserver: 'readonly',
+        localStorage: 'readonly', sessionStorage: 'readonly',
+        TextEncoder: 'readonly', TextDecoder: 'readonly', DOMParser: 'readonly',
+        AbortController: 'readonly', Worker: 'readonly', self: 'readonly',
+        structuredClone: 'readonly', btoa: 'readonly', atob: 'readonly',
+        escape: 'readonly', unescape: 'readonly', Event: 'readonly',
+        process: 'readonly', Buffer: 'readonly', __dirname: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { args: 'none', varsIgnorePattern: '^_' }],
+      'no-undef': 'error',
+      'no-const-assign': 'error',
+      'no-dupe-keys': 'error',
+      'no-dupe-args': 'error',
+      'no-unreachable': 'error',
+      'no-fallthrough': 'error',
+      'no-self-compare': 'error',
+      'no-cond-assign': 'error',
+    },
+  },
+];

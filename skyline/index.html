@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Skyline Forge — 3D-printable city maps</title>
+<meta name="description" content="Turn any city, neighbourhood or address into a 3D-printable model. Pick a shape, choose your layers, highlight a route, and export a colour 3MF or STL. Runs entirely in your browser.">
+<meta name="theme-color" content="#0f1216">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🏙️</text></svg>">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="css/app.css">
+<script src="vendor/leaflet.js"></script>
+</head>
+<body>
+
+<div id="app" class="app">
+
+  <!-- ─────────────── header ─────────────── -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-text">Skyline<em>Forge</em></span>
+    </div>
+
+    <div class="search" role="search">
+      <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 1 0 3.9 10.6l4.3 4.2 1.4-1.4-4.2-4.3A6 6 0 0 0 10 4Zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z"/></svg>
+      <input id="search-input" type="search" autocomplete="off" spellcheck="false"
+             placeholder="City, address, postcode or 40.748, -73.986"
+             aria-label="Search for a place">
+      <button id="locate-btn" class="icon-btn" type="button" title="Use my location" aria-label="Use my location">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9 3h-2.06A7 7 0 0 0 13 5.06V3h-2v2.06A7 7 0 0 0 5.06 11H3v2h2.06A7 7 0 0 0 11 18.94V21h2v-2.06A7 7 0 0 0 18.94 13H21v-2Zm-9 6a5 5 0 1 1 0-10 5 5 0 0 1 0 10Z"/></svg>
+      </button>
+      <ul id="search-results" class="search-results" role="listbox" hidden></ul>
+    </div>
+
+    <div class="topbar-actions">
+      <button id="help-btn" class="btn ghost" type="button">Guide</button>
+      <button id="generate-btn" class="btn primary" type="button">
+        <span class="btn-label">Generate model</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ─────────────── sidebar ─────────────── -->
+  <aside class="sidebar" id="sidebar">
+
+    <!-- Shape & size -->
+    <section class="panel" data-panel="shape" open>
+      <button class="panel-head" type="button" aria-expanded="true">
+        <span class="panel-title">Shape &amp; size</span><span class="chev"></span>
+      </button>
+      <div class="panel-body">
+        <div class="shape-grid" id="shape-grid" role="radiogroup" aria-label="Plate shape"></div>
+
+        <label class="field" data-show-when="shape.type=rectangle">
+          <span class="field-label">Proportions <output data-out="shape.aspect" data-fmt="ratio"></output></span>
+          <input type="range" data-bind="shape.aspect" min="0.4" max="2.5" step="0.05">
+        </label>
+
+        <label class="field">
+          <span class="field-label">Rotation <output data-out="shape.rotation" data-fmt="deg"></output></span>
+          <input type="range" data-bind="shape.rotation" min="-180" max="180" step="1">
+        </label>
+
+        <label class="field">
+          <span class="field-label">Area across <output data-out="size.areaMetres" data-fmt="distance"></output></span>
+          <input type="range" data-bind="size.areaMetres" data-scale="log" min="150" max="20000" step="1">
+        </label>
+
+        <label class="field">
+          <span class="field-label">Printed size <output data-out="size.printMm" data-fmt="mm"></output></span>
+          <input type="range" data-bind="size.printMm" min="40" max="350" step="1">
+        </label>
+
+        <p class="scale-readout" id="scale-readout">—</p>
+
+        <div class="btn-row">
+          <button id="match-view-btn" class="btn tiny" type="button" title="Set the area to match what you can see">Match view</button>
+          <button id="focus-btn" class="btn tiny" type="button">Centre plate</button>
+          <button id="draw-btn" class="btn tiny" type="button">Draw shape</button>
+        </div>
+        <p class="hint">Drag the plate to move it, shift-scroll to resize.</p>
+      </div>
+    </section>
+
+    <!-- Layers -->
+    <section class="panel" data-panel="layers" open>
+      <button class="panel-head" type="button" aria-expanded="true">
+        <span class="panel-title">Layers &amp; colours</span><span class="chev"></span>
+      </button>
+      <div class="panel-body">
+        <div class="layer-list" id="layer-list"></div>
+        <div class="btn-row">
+          <button class="btn tiny" type="button" data-palette="classic">Classic</button>
+          <button class="btn tiny" type="button" data-palette="blueprint">Blueprint</button>
+          <button class="btn tiny" type="button" data-palette="night">Night</button>
+          <button class="btn tiny" type="button" data-palette="mono">Mono</button>
+        </div>
+        <label class="check">
+          <input type="checkbox" data-bind="print.splitMajorRoads">
+          <span>Give main roads their own colour</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-bind="layers.frame">
+          <span>Border frame</span>
+        </label>
+        <label class="field" data-show-when="layers.frame=true">
+          <span class="field-label">Frame width <output data-out="print.frameWidthMm" data-fmt="mm"></output></span>
+          <input type="range" data-bind="print.frameWidthMm" min="1" max="12" step="0.5">
+        </label>
+      </div>
+    </section>
+
+    <!-- Route -->
+    <section class="panel" data-panel="route">
+      <button class="panel-head" type="button" aria-expanded="false">
+        <span class="panel-title">Highlighted route</span><span class="chev"></span>
+      </button>
+      <div class="panel-body">
+        <label class="check">
+          <input type="checkbox" data-bind="layers.route">
+          <span>Include a route on the plate</span>
+        </label>
+
+        <div data-show-when="layers.route=true">
+          <div class="seg" id="route-profile" role="radiogroup" aria-label="Travel mode"></div>
+
+          <div class="btn-row">
+            <button id="pick-route-btn" class="btn tiny" type="button">Pick points on map</button>
+            <button id="gpx-btn" class="btn tiny" type="button">Load GPX</button>
+            <button id="clear-route-btn" class="btn tiny" type="button">Clear</button>
+          </div>
+          <input id="gpx-input" type="file" accept=".gpx,application/gpx+xml,text/xml" hidden>
+
+          <ul class="waypoints" id="waypoint-list"></ul>
+          <p class="route-summary" id="route-summary">Click <strong>Pick points on map</strong>, then click a start and an end.</p>
+
+          <label class="field">
+            <span class="field-label">Route width <output data-out="route.widthMetres" data-fmt="metres"></output></span>
+            <input type="range" data-bind="route.widthMetres" min="2" max="60" step="1">
+          </label>
+          <label class="field">
+            <span class="field-label">Route height <output data-out="heights.route" data-fmt="mm"></output></span>
+            <input type="range" data-bind="heights.route" min="0.4" max="6" step="0.1">
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- Terrain -->
+    <section class="panel" data-panel="terrain">
+      <button class="panel-head" type="button" aria-expanded="false">
+        <span class="panel-title">Terrain</span><span class="chev"></span>
+      </button>
+      <div class="panel-body">
+        <label class="check">
+          <input type="checkbox" data-bind="terrain.enabled" data-kind="data">
+          <span>Follow real elevation</span>
+        </label>
+        <p class="hint">Worth it for San Francisco or Rio, pointless for Chicago. Adds a few seconds.</p>
+        <div data-show-when="terrain.enabled=true">
+          <label class="field">
+            <span class="field-label">Vertical exaggeration <output data-out="terrain.exaggeration" data-fmt="x"></output></span>
+            <input type="range" data-bind="terrain.exaggeration" min="0.5" max="5" step="0.1">
+          </label>
+          <label class="field">
+            <span class="field-label">Sampling detail <output data-out="terrain.resolution" data-fmt="grid"></output></span>
+            <input type="range" data-bind="terrain.resolution" data-kind="data" min="12" max="56" step="4">
+          </label>
+          <p class="hint" id="relief-readout"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Print settings -->
+    <section class="panel" data-panel="print">
+      <button class="panel-head" type="button" aria-expanded="false">
+        <span class="panel-title">Print tuning</span><span class="chev"></span>
+      </button>
+      <div class="panel-body">
+        <h4 class="sub">Buildings</h4>
+        <label class="field">
+          <span class="field-label">Height scale <output data-out="heights.buildingScale" data-fmt="x"></output></span>
+          <input type="range" data-bind="heights.buildingScale" min="0.3" max="4" step="0.1">
+        </label>
+        <label class="field">
+          <span class="field-label">Shortest building <output data-out="heights.buildingMin" data-fmt="mm"></output></span>
+          <input type="range" data-bind="heights.buildingMin" min="0.4" max="6" step="0.1">
+        </label>
+        <label class="field">
+          <span class="field-label">Tallest building <output data-out="heights.buildingMax" data-fmt="mm"></output></span>
+          <input type="range" data-bind="heights.buildingMax" min="5" max="150" step="1">
+        </label>
+        <label class="check">
+          <input type="checkbox" id="building-parts" data-kind="data">
+          <span>Detailed building parts (landmarks)</span>
+        </label>
+
+        <h4 class="sub">Streets</h4>
+        <label class="field">
+          <span class="field-label">Street width <output data-out="print.roadWidthScale" data-fmt="x"></output></span>
+          <input type="range" data-bind="print.roadWidthScale" min="0.4" max="3" step="0.05">
+        </label>
+        <label class="field">
+          <span class="field-label">Thinnest street <output data-out="print.minRoadWidthMm" data-fmt="mm"></output></span>
+          <input type="range" data-bind="print.minRoadWidthMm" min="0.3" max="3" step="0.05">
+        </label>
+        <p class="hint">Keep this at or above your nozzle width, or narrow streets disappear.</p>
+
+        <h4 class="sub">Plate</h4>
+        <label class="field">
+          <span class="field-label">Base thickness <output data-out="heights.base" data-fmt="mm"></output></span>
+          <input type="range" data-bind="heights.base" min="0.8" max="8" step="0.1">
+        </label>
+        <label class="field">
+          <span class="field-label">Water depth <output data-out="heights.waterDepth" data-fmt="mm"></output></span>
+          <input type="range" data-bind="heights.waterDepth" min="0" max="3" step="0.1">
+        </label>
+        <label class="field">
+          <span class="field-label">Street relief <output data-out="heights.roads" data-fmt="mm"></output></span>
+          <input type="range" data-bind="heights.roads" min="0" max="4" step="0.1">
+        </label>
+        <label class="field">
+          <span class="field-label">Park relief <output data-out="heights.green" data-fmt="mm"></output></span>
+          <input type="range" data-bind="heights.green" min="0" max="4" step="0.1">
+        </label>
+        <label class="field">
+          <span class="field-label">Frame height <output data-out="heights.frame" data-fmt="mm"></output></span>
+          <input type="range" data-bind="heights.frame" min="0" max="20" step="0.5">
+        </label>
+
+        <h4 class="sub">Detail</h4>
+        <label class="field">
+          <span class="field-label">Simplification <output data-out="print.simplifyMm" data-fmt="mm"></output></span>
+          <input type="range" data-bind="print.simplifyMm" min="0.02" max="0.8" step="0.02">
+        </label>
+        <label class="field">
+          <span class="field-label">Drop details under <output data-out="print.minFeatureMm2" data-fmt="mm2"></output></span>
+          <input type="range" data-bind="print.minFeatureMm2" min="0" max="5" step="0.1">
+        </label>
+        <label class="field" data-show-when="layers.trees=true">
+          <span class="field-label">Maximum trees <output data-out="print.maxTrees" data-fmt="int"></output></span>
+          <input type="range" data-bind="print.maxTrees" min="20" max="2000" step="20">
+        </label>
+      </div>
+    </section>
+
+    <!-- Nameplate -->
+    <section class="panel" data-panel="nameplate">
+      <button class="panel-head" type="button" aria-expanded="false">
+        <span class="panel-title">Nameplate</span><span class="chev"></span>
+      </button>
+      <div class="panel-body">
+        <label class="check">
+          <input type="checkbox" data-bind="layers.nameplate">
+          <span>Add a nameplate bar</span>
+        </label>
+        <div data-show-when="layers.nameplate=true">
+          <label class="field">
+            <span class="field-label">Title</span>
+            <input type="text" data-bind="nameplate.title" maxlength="40" placeholder="NEW YORK">
+          </label>
+          <label class="field">
+            <span class="field-label">Subtitle</span>
+            <input type="text" data-bind="nameplate.subtitle" maxlength="60" placeholder="40.7484° N  73.9857° W">
+          </label>
+          <div class="btn-row">
+            <button id="fill-coords-btn" class="btn tiny" type="button">Use coordinates</button>
+          </div>
+          <label class="field">
+            <span class="field-label">Bar height <output data-out="nameplate.barMm" data-fmt="mm"></output></span>
+            <input type="range" data-bind="nameplate.barMm" min="6" max="40" step="1">
+          </label>
+          <label class="field">
+            <span class="field-label">Title size <output data-out="nameplate.titleMm" data-fmt="mm"></output></span>
+            <input type="range" data-bind="nameplate.titleMm" min="2" max="18" step="0.5">
+          </label>
+          <label class="field">
+            <span class="field-label">Lettering relief <output data-out="heights.label" data-fmt="mm"></output></span>
+            <input type="range" data-bind="heights.label" min="0.2" max="3" step="0.1">
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- Export -->
+    <section class="panel" data-panel="export" open>
+      <button class="panel-head" type="button" aria-expanded="true">
+        <span class="panel-title">Export</span><span class="chev"></span>
+      </button>
+      <div class="panel-body">
+        <div class="format-list" id="format-list" role="radiogroup" aria-label="Export format"></div>
+        <button id="export-btn" class="btn primary wide" type="button" disabled>Download</button>
+        <div class="btn-row">
+          <button id="snapshot-btn" class="btn tiny" type="button">Save image</button>
+          <button id="share-btn" class="btn tiny" type="button">Copy link</button>
+          <button id="reset-btn" class="btn tiny" type="button">Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="sidebar-foot">
+      Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.
+      Elevation by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>.
+      Routing by <a href="https://valhalla.readthedocs.io/" target="_blank" rel="noopener">Valhalla</a>.
+    </footer>
+  </aside>
+
+  <!-- ─────────────── stage ─────────────── -->
+  <main class="stage">
+    <div class="stage-tabs" role="tablist">
+      <button class="stage-tab is-active" data-view="split" role="tab">Split</button>
+      <button class="stage-tab" data-view="map" role="tab">Map</button>
+      <button class="stage-tab" data-view="model" role="tab">Model</button>
+      <div class="stage-tools">
+        <select id="basemap-select" class="mini-select" aria-label="Base map style"></select>
+        <div class="view-buttons" role="group" aria-label="Camera angle">
+          <button class="btn tiny" data-cam="iso">Iso</button>
+          <button class="btn tiny" data-cam="top">Top</button>
+          <button class="btn tiny" data-cam="front">Front</button>
+          <button id="spin-btn" class="btn tiny" type="button" aria-pressed="false">Spin</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage-panes" id="stage-panes" data-view="split">
+      <div class="pane pane-map"><div id="map" class="map"></div></div>
+      <div class="pane pane-model">
+        <div id="viewport" class="viewport"></div>
+        <div class="viewport-empty" id="viewport-empty">
+          <p>Your model will appear here.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="statusbar">
+      <div class="status-main">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Ready</span>
+      </div>
+      <div class="status-stats" id="status-stats"></div>
+    </div>
+    <div class="progress" id="progress" hidden><div class="progress-bar" id="progress-bar"></div></div>
+  </main>
+
+  <!-- ─────────────── overlays ─────────────── -->
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <dialog class="guide" id="guide">
+    <article>
+      <h2>Making a good print</h2>
+
+      <h3>1. Frame the shot</h3>
+      <p>Search for a place, then drag the plate to move it and shift-scroll to resize.
+      <strong>Match view</strong> snaps the plate to whatever is on screen. Somewhere between
+      800 m and 3 km across gives you recognisable streets at a sensible print size.</p>
+
+      <h3>2. Watch the thinnest street</h3>
+      <p>Streets are widened to a printable minimum so they do not vanish when the map is
+      shrunk to 150 mm. Set <strong>Thinnest street</strong> to your nozzle diameter — 0.4 mm
+      nozzles want about 0.85 mm so the slicer can lay down two walls.</p>
+
+      <h3>3. Colours are parts, not paint</h3>
+      <p>Every colour is a separate solid. The plate is carved so no two parts overlap, which
+      means a five-filament print and a single-colour print come from the same geometry. Export
+      <strong>3MF</strong> for multi-material, or the <strong>per-layer STL</strong> bundle to
+      assign filaments manually.</p>
+
+      <h3>4. Buildings are estimates</h3>
+      <p>OpenStreetMap knows exact heights for some buildings and level counts for many more.
+      Where it knows nothing, height is inferred from the building type. Use
+      <strong>Height scale</strong> to push the skyline up if it reads flat.</p>
+
+      <h3>5. Printing notes</h3>
+      <ul>
+        <li>No supports needed — everything sits on a flat base.</li>
+        <li>0.12–0.16 mm layers keep the lettering and kerb lines readable.</li>
+        <li>Print the base a couple of layers thick before the streets start.</li>
+        <li>Skip the brim; the plate has plenty of bed contact.</li>
+      </ul>
+
+      <h3>Where the data comes from</h3>
+      <p>Buildings, roads, water and parks come from OpenStreetMap via Overpass. Elevation is
+      Copernicus DEM through Open-Meteo. Routing is Valhalla. Nothing is uploaded anywhere —
+      the model is built in your browser.</p>
+
+      <h3>Known limits</h3>
+      <ul>
+        <li>Coverage is only as good as OSM in that neighbourhood.</li>
+        <li>Bridges print as solid roadbed, not as spans.</li>
+        <li>Terrain is 90 m resolution, so it captures hills rather than kerbs.</li>
+        <li>Very large areas can hit the public Overpass rate limits — wait a minute and retry.</li>
+      </ul>
+    </article>
+    <button class="btn primary" id="guide-close" type="button">Got it</button>
+  </dialog>
+
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

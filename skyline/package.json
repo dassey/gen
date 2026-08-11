@@ -1,0 +1,16 @@
+{
+  "name": "skyline-forge",
+  "version": "1.0.0",
+  "description": "Turn any city, neighbourhood or address into a 3D-printable model, entirely in the browser.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "serve": "http-server .. -p 8080 -c-1",
+    "test": "node test/geometry.mjs && node test/smoke.mjs",
+    "test:geometry": "node test/geometry.mjs",
+    "test:smoke": "node test/smoke.mjs",
+    "test:browser": "node test/browser.mjs",
+    "lint": "eslint js test --no-config-lookup -c eslint.config.mjs"
+  }
+}

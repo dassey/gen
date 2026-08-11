@@ -15,7 +15,7 @@ STL you can drop straight into your slicer.
 
 | | |
 |---|---|
-| **Find anywhere** | City, address, postcode, landmark or raw coordinates. Type-ahead search, or use your current location. |
+| **Find anywhere** | City, address, postcode, landmark or raw coordinates. Street addresses are resolved by Nominatim, which indexes house numbers; everything else uses Photon, which is built for type-ahead. |
 | **Ten plate shapes** | Circle, square, rounded square, rectangle, hexagon, octagon, triangle, heart, star — or draw your own outline on the map. |
 | **Real layers, real colours** | Buildings, main roads, streets, rail, water, parks, trees, route, frame and nameplate, each a separately coloured solid. |
 | **Highlighted routes** | Route A→B by car, foot or bike, or drop in a GPX file — your marathon, your commute, your road trip — as a raised ribbon across the plate. |
@@ -25,6 +25,9 @@ STL you can drop straight into your slicer.
 | **Four export formats** | Colour 3MF, merged STL, per-layer STL bundle, or OBJ+MTL. |
 
 Everything runs client-side. The only network traffic is fetching map data.
+
+It works on a phone: one pane at a time, and the settings live in a bottom
+sheet that stays out of the way until you pull it up.
 
 ---
 
@@ -74,6 +77,32 @@ Export **STL**. Everything is merged into one solid.
 Export the **per-layer STL bundle**. Every file shares the same origin, so
 loading them together reassembles the model exactly. A README in the ZIP has
 the click-by-click for PrusaSlicer, Orca, Bambu Studio and Cura.
+
+### "My slicer reports thousands of non-manifold edges"
+
+Expected, and not a leak.
+
+Each coloured layer is its own closed solid. Where two of them meet, they each
+carry the wall between them, so that shared face has four triangles around it
+rather than two — and mesh checkers count every one. A dense city has thousands
+of such faces.
+
+The number that matters is **open** edges, and it is zero. `test/manifold.mjs`
+re-reads an exported 3MF the way a slicer does — welding by the coordinates
+actually written to the file — and reports both counts separately:
+
+```
+$ node test/manifold.mjs test/out/manhattan-midtown.3mf
+  holes (1 triangle) 0        <- leaks: none
+  shared (4+)        4,810    <- parts meeting face to face
+  degenerate faces   0
+```
+
+Watertight parts are exactly what a multi-material slicer wants, because each
+becomes a volume it can assign a filament to. Let it "repair" if it offers;
+the sliced result is the same. To avoid the warning entirely, export the
+single-file STL and print in one colour, or use the per-layer bundle where each
+file is independently closed.
 
 ### Settings that actually matter
 

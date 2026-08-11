@@ -4,7 +4,7 @@
  * that STL/3MF export is a straight copy with no axis juggling.
  */
 
-import { ringArea, triangulatePolygon } from './geom.js';
+import { ringArea, triangulatePolygon, snapMultiPolygon } from './geom.js';
 
 const GROWTH = 1.6;
 
@@ -139,7 +139,19 @@ export function orientPolygon(poly) {
  */
 export function extrudePolygon(mesh, poly, bottom, top, opts = {}) {
   const { capBottom = true } = opts;
-  const oriented = orientPolygon(poly);
+
+  // Snap to the micron grid before triangulating.
+  //
+  // Boolean output routinely places vertices a few nanometres apart. Left
+  // alone they survive in memory but collapse when a file format rounds them —
+  // 3MF writes millimetres to three decimals — turning a valid triangle into a
+  // zero-area facet that every mesh checker flags. Quantising here means the
+  // rounding on export is exact, and identical positions stay identical, so
+  // neighbouring parts still meet perfectly.
+  const snapped = snapMultiPolygon(poly.length ? [poly] : [])[0];
+  if (!snapped) return false;
+
+  const oriented = orientPolygon(snapped);
   const tri = triangulatePolygon(oriented);
   if (!tri) return false;
 

@@ -44,6 +44,11 @@
   <!-- ─────────────── sidebar ─────────────── -->
   <aside class="sidebar" id="sidebar">
 
+    <!-- Collapsed grab bar; only visible on narrow screens -->
+    <button class="sheet-handle" id="sheet-handle" type="button" aria-expanded="false" aria-controls="sidebar">
+      <span>Settings</span>
+    </button>
+
     <!-- Shape & size -->
     <section class="panel" data-panel="shape" open>
       <button class="panel-head" type="button" aria-expanded="true">
@@ -103,6 +108,10 @@
         <label class="check">
           <input type="checkbox" data-bind="layers.frame">
           <span>Border frame</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-bind="layers.nameplate">
+          <span>Nameplate bar below the map</span>
         </label>
         <label class="field" data-show-when="layers.frame=true">
           <span class="field-label">Frame width <output data-out="print.frameWidthMm" data-fmt="mm"></output></span>
@@ -378,6 +387,18 @@
         <li>Print the base a couple of layers thick before the streets start.</li>
         <li>Skip the brim; the plate has plenty of bed contact.</li>
       </ul>
+
+      <h3>“My slicer says thousands of non-manifold edges”</h3>
+      <p>That is expected for the colour 3MF, and it is not a leak. Each coloured
+      layer is its own closed solid, and where two of them meet they each carry the
+      wall between them — so that shared face has four triangles around it instead
+      of two. Mesh checkers count every one of those and report a large number.</p>
+      <p>What matters is <strong>open</strong> edges, and there are none: each part is
+      watertight, which is what a multi-material slicer needs in order to assign a
+      filament per part. Let it “repair” if it offers to; the result is the same.</p>
+      <p>If you would rather not see the warning at all, export the
+      <strong>single-file STL</strong> and print in one colour, or load the per-layer
+      STL bundle, where each file is separately closed.</p>
 
       <h3>Where the data comes from</h3>
       <p>Buildings, roads, water and parks come from OpenStreetMap via Overpass. Elevation is

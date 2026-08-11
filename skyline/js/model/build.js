@@ -280,7 +280,7 @@ export function buildModel(features, s, ctx = {}) {
   const frameOn = s.layers.frame && s.print.frameWidthMm > 0.2;
   if (frameOn) {
     const band = G.bandAroundRings(plateMp, s.print.frameWidthMm);
-    rimMp = G.intersection(band, plateMp);
+    rimMp = G.snapMultiPolygon(G.intersection(band, plateMp));
     innerMp = G.difference(plateMp, rimMp);
     if (!innerMp.length) {
       warnings.push('The frame is wider than the plate — reduce the frame width.');
@@ -290,8 +290,8 @@ export function buildModel(features, s, ctx = {}) {
   }
 
   // The city only ever occupies the map area, never the nameplate bar.
-  const cityArea = barMp.length ? G.intersection(innerMp, shapeMp) : innerMp;
-  const plaqueArea = barMp.length ? G.difference(innerMp, shapeMp) : [];
+  const cityArea = G.snapMultiPolygon(barMp.length ? G.intersection(innerMp, shapeMp) : innerMp);
+  const plaqueArea = barMp.length ? G.snapMultiPolygon(G.difference(innerMp, shapeMp)) : [];
 
   /* ---- terrain ---- */
 
@@ -524,7 +524,7 @@ export function buildModel(features, s, ctx = {}) {
       polys.push(...laid.polygons);
     }
     if (polys.length) {
-      textMp = G.intersection(G.normalize(polys), innerMp);
+      textMp = G.snapMultiPolygon(G.intersection(G.normalize(polys), innerMp));
     }
   }
 
@@ -536,9 +536,16 @@ export function buildModel(features, s, ctx = {}) {
   // road union can pull a ring across itself. Re-normalising afterwards repairs
   // that before the boolean chain — and before earcut, which would otherwise
   // triangulate the crossing into a spike.
+  //
+  // Snapping to the micron grid at the same time keeps the areas reported in
+  // the stats identical to the areas that actually get extruded, and means the
+  // rounding an export format applies is lossless.
   const tidy = (mp) =>
     mp.length
-      ? G.dropTinyPolygons(G.normalize(G.simplifyMultiPolygon(mp, simplifyTol)), minArea)
+      ? G.dropTinyPolygons(
+          G.snapMultiPolygon(G.normalize(G.simplifyMultiPolygon(mp, simplifyTol))),
+          minArea
+        )
       : [];
 
   routeMp = tidy(routeMp);
@@ -590,7 +597,10 @@ export function buildModel(features, s, ctx = {}) {
         poly = G.difference(poly, routeRegion);
         if (!poly.length) continue;
       }
-      poly = G.dropTinyPolygons(G.simplifyMultiPolygon(poly, simplifyTol), minArea);
+      poly = G.dropTinyPolygons(
+        G.snapMultiPolygon(G.simplifyMultiPolygon(poly, simplifyTol)),
+        minArea
+      );
       if (!poly.length) continue;
       buildingsPlaced.push({ mp: poly, heightM: b.heightM });
     }
@@ -822,6 +832,22 @@ export function buildModel(features, s, ctx = {}) {
       // individual footprints — buildings routinely overlap one another in OSM.
       plateAreaMm2: G.multiPolygonArea(plateMp),
       builtUpMm2: builtUpArea,
+      // Per-region areas straight from the boolean results. These describe the
+      // partition itself; measuring the triangle soup instead would also count
+      // the redundant coplanar triangles earcut sometimes emits inside a
+      // self-touching ring, which change nothing about the printed solid.
+      regionAreas: {
+        route: G.multiPolygonArea(routeRegion),
+        buildings: builtUpArea,
+        rail: G.multiPolygonArea(railRegion),
+        roadsMajor: G.multiPolygonArea(roadsMajorRegion),
+        roads: G.multiPolygonArea(roadsRegion),
+        water: G.multiPolygonArea(waterRegion),
+        green: G.multiPolygonArea(greenRegion),
+        ground: G.multiPolygonArea(groundRegion),
+        frame: G.multiPolygonArea(rimMp) + G.multiPolygonArea(plaqueRegion),
+        label: G.multiPolygonArea(textMp),
+      },
       scaleDenominator: Math.round(1 / mmPerMetre * 1000),
       mmPerMetre,
       elapsedMs: Date.now() - t0,

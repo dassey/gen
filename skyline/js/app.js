@@ -410,17 +410,13 @@ class App {
     });
 
     for (const tab of document.querySelectorAll('.stage-tab')) {
-      tab.addEventListener('click', () => {
-        for (const t of document.querySelectorAll('.stage-tab')) {
-          t.classList.toggle('is-active', t === tab);
-        }
-        this.el['stage-panes'].dataset.view = tab.dataset.view;
-        requestAnimationFrame(() => {
-          this.picker.invalidateSize();
-          this.viewer.resize();
-          this.viewer.frameModel();
-        });
-      });
+      tab.addEventListener('click', () => this.showPane(tab.dataset.view));
+    }
+    // Split does not fit on a phone, so start on the map and let the tabs do
+    // the switching.
+    if (this.isNarrow()) {
+      this.showPane('map');
+      this.clearStale();
     }
 
     for (const btn of document.querySelectorAll('[data-cam]')) {
@@ -438,9 +434,40 @@ class App {
     el['help-btn'].addEventListener('click', () => el.guide.showModal());
     el['guide-close'].addEventListener('click', () => el.guide.close());
 
+    // Bottom sheet (mobile only; the handle is display:none on desktop).
+    const handle = el['sheet-handle'];
+    handle.addEventListener('click', () => {
+      const open = el.sidebar.classList.toggle('is-open');
+      handle.setAttribute('aria-expanded', String(open));
+      if (open) el.sidebar.scrollTop = 0;
+    });
+    // A generate always means "show me the result", so get out of the way.
+    el['generate-btn'].addEventListener('click', () => {
+      if (window.matchMedia('(max-width: 860px)').matches) {
+        el.sidebar.classList.remove('is-open');
+        handle.setAttribute('aria-expanded', 'false');
+      }
+    });
+
     this.wireSearch();
 
     window.addEventListener('beforeunload', () => this.saveSettings());
+  }
+
+  isNarrow() {
+    return window.matchMedia('(max-width: 860px)').matches;
+  }
+
+  showPane(view) {
+    for (const t of document.querySelectorAll('.stage-tab')) {
+      t.classList.toggle('is-active', t.dataset.view === view);
+    }
+    this.el['stage-panes'].dataset.view = view;
+    requestAnimationFrame(() => {
+      this.picker.invalidateSize();
+      this.viewer.resize();
+      this.viewer.frameModel();
+    });
   }
 
   /* ================= search ================= */
@@ -497,6 +524,9 @@ class App {
       controller?.abort();
       const q = input.value.trim();
       if (q.length < 2) return close();
+      // Street addresses are resolved by Nominatim, which allows one request a
+      // second, so wait longer before spending one.
+      const wait = geocode.looksLikeStreetAddress(q) ? 550 : 220;
       timer = setTimeout(async () => {
         controller = new AbortController();
         try {
@@ -507,7 +537,7 @@ class App {
             })
           );
         } catch { /* aborted or offline; leave the previous list up */ }
-      }, 220);
+      }, wait);
     });
 
     input.addEventListener('keydown', (e) => {
@@ -556,18 +586,22 @@ class App {
     this.settings.location.label = place.label;
 
     // Fit the plate to the place: a whole city wants kilometres, a single
-    // address wants a couple of blocks.
-    if (place.bbox) {
+    // address wants the surrounding few blocks. A house does have a bounding
+    // box, but it is the size of the building, so it is handled first.
+    if (place.kind === 'house' || place.kind === 'coordinates') {
+      this.settings.size.areaMetres = clamp(this.settings.size.areaMetres, 300, 1200);
+    } else if (place.bbox) {
       const span = spanOfBbox(place.bbox);
       if (span > 200) {
         this.settings.size.areaMetres = clamp(span * 1.05, 300, 20000);
       }
-    } else if (place.kind === 'house' || place.kind === 'coordinates') {
-      this.settings.size.areaMetres = clamp(this.settings.size.areaMetres, 300, 1500);
     }
 
     if (!this.settings.nameplate.title) {
-      this.settings.nameplate.title = place.label.toUpperCase().slice(0, 40);
+      // "6624 NORTH BROADWAY AVENUE" is a poor nameplate; the town is better.
+      const source =
+        place.kind === 'house' ? place.detail.split(',')[0].trim() || place.label : place.label;
+      this.settings.nameplate.title = source.toUpperCase().slice(0, 40);
     }
 
     this.el['search-input'].value = '';
@@ -729,14 +763,15 @@ class App {
   markStale() {
     const btn = this.el['generate-btn'];
     btn.classList.add('is-active');
-    btn.querySelector('.btn-label').textContent = 'Fetch map data';
+    btn.querySelector('.btn-label').textContent = this.isNarrow() ? 'Fetch' : 'Fetch map data';
     this.status('This area needs fresh map data — press Fetch map data.', 'warn');
   }
 
   clearStale() {
     const btn = this.el['generate-btn'];
     btn.classList.remove('is-active');
-    btn.querySelector('.btn-label').textContent = 'Generate model';
+    // A phone header has room for one word, and it is the verb that matters.
+    btn.querySelector('.btn-label').textContent = this.isNarrow() ? 'Generate' : 'Generate model';
   }
 
   /** Bounding box the current plate needs, with a small margin. */
@@ -909,6 +944,10 @@ class App {
     this.renderStats(msg.result);
     this.setBusy(false);
 
+    // On a phone the model lives behind a tab, so a build the user asked for
+    // should bring it to the front.
+    if (this.isNarrow() && !this._silentJob) this.showPane('model');
+
     const { stats, warnings } = msg.result;
     this.status(
       `${stats.buildingCount.toLocaleString()} buildings · ` +
@@ -940,10 +979,12 @@ class App {
     // but the tall buildings still get infilled.
     const grams = cm3 * 1.24 * 0.55;
     this.el['status-stats'].innerHTML = [
-      `<span><b>${stats.widthMm.toFixed(0)}</b>×<b>${stats.depthMm.toFixed(0)}</b>×<b>${stats.heightMm.toFixed(1)}</b> mm</span>`,
-      `<span>1:<b>${stats.scaleDenominator.toLocaleString()}</b></span>`,
-      `<span>≈<b>${grams.toFixed(0)}</b> g</span>`,
-      stats.terrainRelief > 2 ? `<span><b>${stats.terrainRelief.toFixed(0)}</b> m relief</span>` : '',
+      `<span class="s-dims"><b>${stats.widthMm.toFixed(0)}</b>×<b>${stats.depthMm.toFixed(0)}</b>×<b>${stats.heightMm.toFixed(1)}</b> mm</span>`,
+      `<span class="s-scale">1:<b>${stats.scaleDenominator.toLocaleString()}</b></span>`,
+      `<span class="s-mass">≈<b>${grams.toFixed(0)}</b> g</span>`,
+      stats.terrainRelief > 2
+        ? `<span class="s-relief"><b>${stats.terrainRelief.toFixed(0)}</b> m relief</span>`
+        : '',
     ].join('');
 
     if (stats.terrainRelief > 0) {

@@ -100,7 +100,7 @@ function encodePolyline(points, precision = 6) {
 }
 
 async function installStubs(page, osm) {
-  const seen = { overpass: 0, elevation: 0, route: 0, geocode: 0 };
+  const seen = { overpass: 0, elevation: 0, route: 0, geocode: 0, nominatimSearch: 0 };
 
   await page.route('**://*/api/interpreter', (route) => {
     seen.overpass++;
@@ -132,15 +132,33 @@ async function installStubs(page, osm) {
     });
   });
 
-  await page.route('**://nominatim.openstreetmap.org/**', (route) =>
-    route.fulfill({
+  await page.route('**://nominatim.openstreetmap.org/**', (route) => {
+    const url = route.request().url();
+    if (url.includes('/search')) {
+      seen.nominatimSearch++;
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            lat: String(FIXTURE.lat), lon: String(FIXTURE.lon), type: 'house',
+            display_name: '6624, North Broadway Avenue, Gladstone, Missouri',
+            boundingbox: ['40.7548', '40.7550', '-73.9841', '-73.9839'],
+            address: {
+              house_number: '6624', road: 'North Broadway Avenue',
+              city: 'Gladstone', state: 'Missouri', country: 'United States',
+            },
+          },
+        ]),
+      });
+    }
+    return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         address: { city: 'New York', state: 'New York', country: 'United States', country_code: 'us' },
         display_name: 'Midtown, Manhattan, New York',
       }),
-    })
-  );
+    });
+  });
 
   await page.route('**://api.open-meteo.com/**', (route) => {
     seen.elevation++;
@@ -289,6 +307,38 @@ async function installStubs(page, osm) {
     await page.waitForTimeout(400);
     ok('picking a suggestion fills the nameplate title',
       (await page.evaluate(() => window.skylineForge.settings.nameplate.title)).length > 0);
+
+    // A house number has to go to Nominatim: Photon does not index them, and
+    // answers this exact query with the local post office.
+    console.log('\nStreet address');
+    await page.evaluate(() => { window.skylineForge.settings.nameplate.title = ''; });
+    const searchesBefore = seen.nominatimSearch;
+    await page.fill('#search-input', '6624 N Broadway, Gladstone, MO');
+    // The suggestion list keeps its previous items in the DOM while hidden, so
+    // wait for the new results rather than for "some results".
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('#search-results li .r-main');
+        return el && el.textContent.startsWith('6624');
+      },
+      { timeout: 20000 }
+    ).catch(() => {});
+    ok('an address query is sent to the address geocoder',
+      seen.nominatimSearch > searchesBefore,
+      `${seen.nominatimSearch - searchesBefore} lookups`);
+    const firstResult = await page.locator('#search-results li .r-main').first().textContent();
+    ok('the house number itself is offered, not a nearby landmark',
+      firstResult.startsWith('6624'), `got "${firstResult}"`);
+    await page.locator('#search-results li').first().click();
+    await page.waitForTimeout(400);
+    const addressPick = await page.evaluate(() => ({
+      area: window.skylineForge.settings.size.areaMetres,
+      title: window.skylineForge.settings.nameplate.title,
+    }));
+    ok('a house frames a neighbourhood, not the building',
+      addressPick.area >= 300 && addressPick.area <= 1200, `${addressPick.area} m`);
+    ok('the nameplate uses the town, not the street number',
+      addressPick.title === 'GLADSTONE', `got "${addressPick.title}"`);
 
     /* ---------- shapes ---------- */
     console.log('\nShapes');
@@ -490,6 +540,91 @@ async function installStubs(page, osm) {
     await page.waitForFunction(() => window.skylineForge !== undefined, { timeout: 20000 });
     const persisted = await page.evaluate(() => window.skylineForge.settings.nameplate.title);
     ok('settings survive a reload', persisted === 'NEW YORK', `got "${persisted}"`);
+
+    /* ---------- mobile ---------- */
+    console.log('\nMobile layout');
+    const phone = await browser.newPage({
+      viewport: { width: 390, height: 844 },
+      deviceScaleFactor: 2,
+      isMobile: true,
+      hasTouch: true,
+    });
+    phone.setDefaultTimeout(120000);
+    const phoneErrors = [];
+    phone.on('pageerror', (e) => phoneErrors.push(e.message));
+    await installStubs(phone, osm);
+    await phone.goto(`http://localhost:${PORT}/index.html`, { waitUntil: 'load' });
+    await phone.waitForFunction(() => window.skylineForge !== undefined, { timeout: 20000 });
+    await phone.waitForFunction(
+      () => window.skylineForge.model?.parts?.length > 0 && !window.skylineForge.busy,
+      { timeout: 150000 }
+    );
+
+    ok('phone starts on the map, not a three-way split',
+      (await phone.getAttribute('#stage-panes', 'data-view')) === 'map');
+    ok('the Split tab is hidden on a phone',
+      !(await phone.locator('.stage-tab[data-view="split"]').isVisible()));
+
+    const collapsed = await phone.locator('#sidebar').boundingBox();
+    ok('settings start collapsed to a grab bar',
+      collapsed.height < 60, `${collapsed.height.toFixed(0)} px tall`);
+    ok('the map gets most of the screen',
+      (await phone.locator('#map').boundingBox()).height > 500);
+
+    // Clear any toast first: they sit just above the sheet and can intercept
+    // the tap, which makes this check flaky rather than wrong.
+    await phone.evaluate(() => { document.getElementById('toasts').innerHTML = ''; });
+    await phone.click('#sheet-handle');
+    await phone.waitForSelector('#sidebar.is-open', { timeout: 5000 });
+    // Wait for the slide to finish rather than for a fixed delay: max-height
+    // animates on the main thread, and under software WebGL the render loop
+    // starves it to a few frames a second.
+    await phone
+      .waitForFunction(
+        () => document.getElementById('sidebar').getBoundingClientRect().height > 400,
+        { timeout: 15000 }
+      )
+      .catch(() => {});
+    const expanded = await phone.locator('#sidebar').boundingBox();
+    ok('tapping the grab bar opens the sheet', expanded.height > 400,
+      `${expanded.height.toFixed(0)} px tall`);
+    await phone.screenshot({ path: join(SHOTS, '07-phone-settings.png') });
+
+    // The nameplate has to be removable from the layer list, which is the
+    // first place anyone will look for it.
+    const nameplateRow = phone.locator('.layer-row', { hasText: 'Nameplate' });
+    ok('the layer list has a Nameplate checkbox', (await nameplateRow.count()) === 1);
+    await phone.evaluate(() => {
+      const app = window.skylineForge;
+      app.settings.nameplate.title = 'GLADSTONE';
+      app.syncUi();
+      app.onChange('geometry');
+    });
+    await phone.waitForTimeout(800);
+    await phone.waitForFunction(() => !window.skylineForge.busy);
+    ok('the nameplate is in the model to start with',
+      await phone.evaluate(() =>
+        window.skylineForge.model.parts.some((p) => p.id === 'label')));
+
+    await nameplateRow.locator('input[type="checkbox"]').click();
+    await phone.waitForTimeout(800);
+    await phone.waitForFunction(() => !window.skylineForge.busy);
+    const afterUncheck = await phone.evaluate(() => ({
+      hasLabel: window.skylineForge.model.parts.some((p) => p.id === 'label'),
+      depth: window.skylineForge.model.stats.depthMm,
+      width: window.skylineForge.model.stats.widthMm,
+    }));
+    ok('unchecking Nameplate removes the lettering', !afterUncheck.hasLabel);
+    ok('unchecking Nameplate removes the whole bar, not just the text',
+      Math.abs(afterUncheck.depth - afterUncheck.width) < 1.5,
+      `${afterUncheck.width.toFixed(0)} x ${afterUncheck.depth.toFixed(0)} mm`);
+
+    await phone.click('.stage-tab[data-view="model"]');
+    await phone.waitForTimeout(600);
+    await phone.screenshot({ path: join(SHOTS, '08-phone-model.png') });
+    ok('no page errors on the phone layout', phoneErrors.length === 0,
+      phoneErrors.slice(0, 2).join(' | '));
+    await phone.close();
 
     /* ---------- console hygiene ---------- */
     console.log('\nConsole');

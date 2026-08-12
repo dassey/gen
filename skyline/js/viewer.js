@@ -92,9 +92,18 @@ export class Viewer {
   resize() {
     const { clientWidth: w, clientHeight: h } = this.container;
     if (!w || !h) return;
-    this.camera.aspect = w / h;
+    const aspect = w / h;
+    const changed = !this._lastAspect || Math.abs(aspect - this._lastAspect) / this._lastAspect > 0.1;
+
+    this.camera.aspect = aspect;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h, false);
+    this._lastAspect = aspect;
+
+    // A big aspect change means the pane was switched or the phone was turned.
+    // Re-fitting only on a big change leaves the user's own zoom alone during
+    // ordinary window resizing.
+    if (changed && this.parts.size) this.frameModel();
   }
 
   _animate() {
@@ -202,15 +211,22 @@ export class Viewer {
   }
 
   /** Pull the camera back so the whole plate fits, keeping the current angle. */
-  frameModel(padding = 1.25) {
+  frameModel(padding) {
     const box = this._boundingBox();
     if (!box) return;
+    // A tall narrow viewport is limited by its width, so the usual margin
+    // leaves the model marooned in the middle of a lot of empty sky.
+    if (padding === undefined) padding = this.camera.aspect < 0.9 ? 1.06 : 1.25;
     const size = box.getSize(new THREE.Vector3());
     const centre = box.getCenter(new THREE.Vector3());
     const radius = Math.max(size.length() / 2, 10);
 
-    const fov = (this.camera.fov * Math.PI) / 180;
-    const distance = (radius / Math.sin(fov / 2)) * padding;
+    // Fit to whichever axis is tighter. On a phone held upright the horizontal
+    // field of view is far narrower than the vertical one, and fitting to the
+    // vertical alone puts half the plate off the side of the screen.
+    const vFov = (this.camera.fov * Math.PI) / 180;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
+    const distance = (radius / Math.sin(Math.min(vFov, hFov) / 2)) * padding;
 
     const direction = this.camera.position
       .clone()

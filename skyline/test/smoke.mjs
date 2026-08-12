@@ -373,16 +373,30 @@ async function runCase(spec) {
   // Buildings are counted from the area the builder actually claimed, not from
   // the sum of individual footprints, because OSM routinely stacks overlapping
   // outlines on the same structure.
-  const surfaceFootprint = result.parts
-    .filter((p) => p.id !== 'buildings' && p.id !== 'trees')
-    .reduce((sum, p) => sum + footprintArea(p), 0);
-  const covered =
-    (surfaceFootprint + result.stats.builtUpMm2) / result.stats.plateAreaMm2;
+  const claimed = Object.values(result.stats.regionAreas).reduce((a, b) => a + b, 0);
+  const covered = claimed / result.stats.plateAreaMm2;
   check(
-    'surface layers tile the plate exactly',
-    covered > 0.985 && covered < 1.015,
-    `layers cover ${(covered * 100).toFixed(1)}% of the plate`
+    'the partition tiles the plate exactly',
+    covered > 0.995 && covered < 1.005,
+    `regions cover ${(covered * 100).toFixed(2)}% of the plate`
   );
+
+  // And the triangulation must not lose any of it. It may emit a little extra
+  // — earcut can double up coplanar triangles inside a self-touching ring,
+  // which is redundant but prints identically — so only a shortfall is a bug.
+  for (const part of result.parts) {
+    if (part.id === 'trees' || part.id === 'buildings') continue;
+    const declared = result.stats.regionAreas[part.id];
+    if (!declared) continue;
+    // Tolerate rounding dust — a sub-micron ring can vanish when the geometry
+    // is snapped — but not a layer going missing.
+    const floor = Math.min(declared * 0.99, declared - 2);
+    check(
+      `${part.id}: all of its region reaches the mesh`,
+      footprintArea(part) >= floor,
+      `region ${declared.toFixed(0)} mm², mesh ${footprintArea(part).toFixed(0)} mm²`
+    );
+  }
 
   /* --- exporters --- */
   mkdirSync(OUT, { recursive: true });
@@ -404,6 +418,16 @@ async function runCase(spec) {
     (mfText.match(/<base /g) || []).length === result.parts.length);
   check('3MF assembles parts into one object', mfText.includes('<components>'));
   writeFileSync(join(OUT, `${stem}.3mf`), mfBytes);
+
+  // Re-read the file the way a slicer does: weld by the coordinates actually
+  // written to it, then look for leaks. Geometry that is watertight in memory
+  // can still spring holes once a format rounds it, and 3MF writes millimetres
+  // to three decimals.
+  const written = analyseWrittenMesh(mfText);
+  check('exported 3MF has no holes', written.holes === 0,
+    `${written.holes} edges with a single triangle`);
+  check('exported 3MF has no degenerate facets', written.degenerate === 0,
+    `${written.degenerate} zero-area triangles after rounding`);
 
   const { obj, mtl } = toObj(result.parts, stem);
   const vCount = (obj.match(/^v /gm) || []).length;
@@ -531,6 +555,53 @@ function connectedComponents(parts) {
   }
 
   return { count: counts.length, largestShare: counts[0] / total, strandedParts };
+}
+
+/**
+ * Per-object leak check on the written 3MF XML.
+ *
+ * Only holes and degenerate facets count as failures. Edges shared by four
+ * triangles are two parts meeting face to face, which is what a multi-material
+ * model is supposed to look like and is not a defect.
+ */
+function analyseWrittenMesh(xml) {
+  let holes = 0;
+  let degenerate = 0;
+
+  const objectRe = /<object id="\d+"[^>]*>([\s\S]*?)<\/object>/g;
+  let m;
+  while ((m = objectRe.exec(xml))) {
+    const body = m[1];
+    if (!body.includes('<mesh>')) continue;
+
+    const verts = [];
+    const vre = /<vertex x="([^"]+)" y="([^"]+)" z="([^"]+)"\/>/g;
+    let v;
+    while ((v = vre.exec(body))) verts.push(`${v[1]},${v[2]},${v[3]}`);
+
+    const id = new Map();
+    const idOf = (s2) => {
+      let n = id.get(s2);
+      if (n === undefined) { n = id.size; id.set(s2, n); }
+      return n;
+    };
+
+    const edges = new Map();
+    const tre = /<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"/g;
+    let t;
+    while ((t = tre.exec(body))) {
+      const a = idOf(verts[+t[1]]);
+      const b = idOf(verts[+t[2]]);
+      const c = idOf(verts[+t[3]]);
+      if (a === b || b === c || a === c) { degenerate++; continue; }
+      for (const [p, q] of [[a, b], [b, c], [c, a]]) {
+        const k = p < q ? `${p}|${q}` : `${q}|${p}`;
+        edges.set(k, (edges.get(k) || 0) + 1);
+      }
+    }
+    for (const [, n] of edges) if (n === 1) holes++;
+  }
+  return { holes, degenerate };
 }
 
 /** Total XY footprint of a part's top-most horizontal faces. */

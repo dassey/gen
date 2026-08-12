@@ -18,7 +18,7 @@ export const FORMATS = [
     id: 'stl',
     label: 'STL — single file',
     ext: 'stl',
-    detail: 'Everything merged. Universal, but no colour information.',
+    detail: 'Every layer merged into one file. Universal, but no colour.',
   },
   {
     id: 'stl-parts',

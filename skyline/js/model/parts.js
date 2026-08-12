@@ -21,8 +21,10 @@ export const PARTS = [
   { id: 'water',      label: 'Water',        color: '#3e8fc1', hint: 'Rivers, lakes and sea' },
   { id: 'green',      label: 'Parks',        color: '#6ba368', hint: 'Parks, forest and grass' },
   { id: 'ground',     label: 'Ground',       color: '#d8d2c2', hint: 'Everything not covered' },
-  { id: 'frame',      label: 'Frame',        color: '#2f3640', hint: 'Border and nameplate bar' },
-  { id: 'label',      label: 'Lettering',    color: '#f4f1ea', hint: 'Raised nameplate text' },
+  { id: 'frame',      label: 'Frame',        color: '#2f3640', hint: 'Border around the plate' },
+  // Named for the whole bar, not just the text: this checkbox is how most
+  // people will look to remove the nameplate, so it has to say so.
+  { id: 'label',      label: 'Nameplate',    color: '#f4f1ea', hint: 'Name bar below the map' },
 ];
 
 export const PART_IDS = PARTS.map((p) => p.id);

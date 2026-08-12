@@ -63,6 +63,20 @@ function photonLabel(props) {
 }
 
 /**
+ * Does this look like a street address rather than a place name?
+ *
+ * "6624 N Broadway, Gladstone MO" — a house number followed by a street. The
+ * distinction matters because Photon does not index house numbers usefully:
+ * asked for that address it returns the Gladstone post office (which is at
+ * number 7170) and three segments of the street, but never the building.
+ * Nominatim resolves it exactly. So address-shaped queries go to Nominatim
+ * even though it is the slower, more rate-limited of the two.
+ */
+export function looksLikeStreetAddress(query) {
+  return /^\s*\d{1,6}[a-z]?\s+\S+/i.test(query) || /^\s*\d{1,6}[a-z]?\s*,/i.test(query);
+}
+
+/**
  * Autocomplete suggestions.
  * @param {string} query
  * @param {object} [opts] `near` biases results towards {lat, lon}
@@ -74,6 +88,17 @@ export async function suggest(query, opts = {}) {
 
   const direct = parseLatLon(q);
   if (direct) return [direct];
+
+  if (looksLikeStreetAddress(q)) {
+    try {
+      const exact = await searchNominatim(q, 6, opts.signal);
+      // Photon still helps when the number is not in OSM at all, so only take
+      // over when Nominatim actually resolved something.
+      if (exact.length) return exact;
+    } catch (err) {
+      if (err.name === 'AbortError') return [];
+    }
+  }
 
   const key = `photon:${q}:${opts.near ? `${opts.near.lat.toFixed(2)},${opts.near.lon.toFixed(2)}` : ''}`;
   if (cache.has(key)) return cache.get(key);
@@ -126,11 +151,19 @@ export async function suggest(query, opts = {}) {
   return results;
 }
 
-/** Structured lookup via Nominatim. Handles bare postcodes well. */
-export async function searchNominatim(query, limit = 5) {
+/** Structured lookup via Nominatim. Handles house numbers and postcodes well. */
+export async function searchNominatim(query, limit = 5, signal) {
   const key = `nom:${query}:${limit}`;
   if (cache.has(key)) return cache.get(key);
+
   await throttleNominatim();
+  // The throttle can hold a request for a second; by then the user may have
+  // typed on, so re-check before spending the call.
+  if (signal?.aborted) {
+    const err = new Error('aborted');
+    err.name = 'AbortError';
+    throw err;
+  }
 
   const url = new URL(`${NOMINATIM}/search`);
   url.searchParams.set('q', query);
@@ -138,25 +171,38 @@ export async function searchNominatim(query, limit = 5) {
   url.searchParams.set('limit', String(limit));
   url.searchParams.set('addressdetails', '1');
 
-  const res = await fetch(url);
+  const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`Nominatim ${res.status}`);
   const data = await res.json();
 
-  const out = data.map((d) => ({
-    lat: parseFloat(d.lat),
-    lon: parseFloat(d.lon),
-    label: d.name || d.display_name.split(',')[0],
-    detail: d.display_name.split(',').slice(1, 4).join(',').trim(),
-    kind: d.type,
-    bbox: d.boundingbox
-      ? {
-          minLat: parseFloat(d.boundingbox[0]),
-          maxLat: parseFloat(d.boundingbox[1]),
-          minLon: parseFloat(d.boundingbox[2]),
-          maxLon: parseFloat(d.boundingbox[3]),
-        }
-      : null,
-  }));
+  const out = data.map((d) => {
+    const a = d.address || {};
+    const street = a.road || a.pedestrian || a.footway || '';
+    // A house has no name of its own, and display_name would show it as a bare
+    // number. Rebuild "6624 North Broadway Avenue" so the list is readable.
+    const label = a.house_number && street
+      ? `${a.house_number} ${street}`
+      : d.name || street || d.display_name.split(',')[0];
+    const place = [a.city || a.town || a.village || a.suburb, a.state, a.country]
+      .filter(Boolean)
+      .join(', ');
+
+    return {
+      lat: parseFloat(d.lat),
+      lon: parseFloat(d.lon),
+      label,
+      detail: place || d.display_name.split(',').slice(1, 4).join(',').trim(),
+      kind: a.house_number ? 'house' : d.type,
+      bbox: d.boundingbox
+        ? {
+            minLat: parseFloat(d.boundingbox[0]),
+            maxLat: parseFloat(d.boundingbox[1]),
+            minLon: parseFloat(d.boundingbox[2]),
+            maxLon: parseFloat(d.boundingbox[3]),
+          }
+        : null,
+    };
+  });
   cache.set(key, out);
   return out;
 }

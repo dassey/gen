@@ -22,6 +22,7 @@ STL you can drop straight into your slicer.
 | **Real terrain** | Optional elevation, so San Francisco arrives with its hills on. |
 | **Engraved nameplate** | Raised city name and coordinates on a bar below the map. |
 | **Print-aware** | Streets are widened to a printable minimum, slivers are dropped, and nothing needs supports. |
+| **Bring your own data** | Drop in GeoJSON, KML, KMZ or a zipped Shapefile when OSM is thin. Reprojected automatically, heights read from any column. |
 | **Four export formats** | Colour 3MF, merged STL, per-layer STL bundle, or OBJ+MTL. |
 
 Everything runs client-side. The only network traffic is fetching map data.
@@ -146,6 +147,56 @@ So the skyline is *plausible*, not surveyed. Use **Height scale** to taste.
 
 ---
 
+## Bringing your own data
+
+OpenStreetMap coverage outside city centres is often machine-traced: every
+building an identical rectangle, none of them with a height. That is a data
+problem, and it is usually fixable — most councils and counties publish
+building footprints on an open-data portal, frequently LiDAR-derived and
+carrying real heights.
+
+Open **Your own data** and drop a file anywhere on the page.
+
+| Format | Notes |
+|---|---|
+| **GeoJSON** | The easy one — a single-click export from QGIS, ArcGIS, geopandas or Overpass. |
+| **Shapefile** | Zip the `.shp`, `.dbf` and `.prj` together and drop the ZIP in. |
+| **KML / KMZ** | What Google Earth and My Maps produce. |
+
+Then say what the columns mean:
+
+- **Use as** — buildings, water, parks, streets, rail or trees. Polygons, lines
+  and points each offer the layers that make sense for them.
+- **Height from** — any numeric column, read as metres, feet or storeys. The
+  guess comes from the values, not just the name: a column topping out at 4 is
+  counting floors, one reaching 300 is measuring feet. The panel reports the
+  range and median it read, and warns when a column resolves to one value
+  everywhere — which means the wrong column, and a print as flat as before.
+- **Replace here / Keep both** — replace swaps OSM's footprints for yours
+  wherever your data reaches, and leaves the rest of the plate untouched.
+
+Imported features are rewritten as OSM-shaped features, so they go through the
+same clipping, layering and extrusion as everything else. There is nothing
+second-class about them: a plate can be built entirely from an upload, with no
+OSM data at all.
+
+### Projections
+
+Government data is almost never in lat/lon. It is in a State Plane zone, a UTM
+zone or a local grid, and the numbers look like `850000, 336500` rather than
+`-94.5, 39.2`.
+
+Coordinates outside ±180/±90 are detected and reprojected using the `.prj` that
+ships with the shapefile — or the `crs` member, if the GeoJSON predates
+RFC 7946. Without projection information the upload is **refused** rather than
+placed in the wrong hemisphere, with a message saying to include the `.prj` or
+re-export as WGS84.
+
+Nothing is uploaded. Files are parsed in the browser and stored in IndexedDB on
+your own device, which is also why they are not part of the share link.
+
+---
+
 ## Known limits
 
 - **Coverage is OSM's coverage.** A neighbourhood nobody has mapped prints
@@ -195,7 +246,8 @@ npx http-server . -p 8080     # then open http://localhost:8080/skyline/
 ### Tests
 
 ```sh
-node test/geometry.mjs    # 88 unit checks — winding, watertightness, booleans
+node test/geometry.mjs    # geometry units — winding, watertightness, booleans
+node test/import.mjs      # shapefile/GeoJSON/KML readers and reprojection
 node test/smoke.mjs       # live OSM data through the whole pipeline
 node test/browser.mjs     # the real page in Chromium, end to end
 ```

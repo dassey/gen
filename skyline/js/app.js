@@ -23,6 +23,8 @@ import * as overpass from './data/overpass.js';
 import * as elevation from './data/elevation.js';
 import * as routing from './data/route.js';
 import { FORMATS, buildExport, downloadBlob, slugify } from './export/index.js';
+import { ImportsPanel } from './imports-ui.js';
+import { applyImports } from './data/import/merge.js';
 
 const STORAGE_KEY = 'skyline-forge/settings/v1';
 const DATA_LAYERS = ['buildings', 'roads', 'rail', 'water', 'green'];
@@ -59,6 +61,8 @@ class App {
     this.busy = false;
 
     this.cache = { bbox: null, layers: [], detail: null, features: null };
+    this.imports = [];
+    this.merged = null; // OSM features with any uploads folded in
     this.exportFormat = '3mf';
     this.dataStale = true;
 
@@ -73,6 +77,7 @@ class App {
     this.initWorker();
     this.bindControls();
     this.bindActions();
+    this.initImports();
     this.syncUi();
 
     this.loadFont();
@@ -741,6 +746,41 @@ class App {
     }
   }
 
+  /* ================= imported data ================= */
+
+  initImports() {
+    this.importsPanel = new ImportsPanel({
+      onChange: (datasets) => {
+        this.imports = datasets;
+        this.merged = null;
+        // An upload is already on the machine, so however much data arrives
+        // this is a geometry change and never needs a download.
+        this.onChange('geometry');
+      },
+      onFocus: (bbox) => {
+        if (!bbox) return;
+        this.settings.location.lat = (bbox.minLat + bbox.maxLat) / 2;
+        this.settings.location.lon = (bbox.minLon + bbox.maxLon) / 2;
+        const span = spanOfBbox(bbox);
+        if (span > 120) this.settings.size.areaMetres = clamp(span * 1.2, 200, 20000);
+        this.picker.update(this.settings);
+        this.picker.focus();
+        this.syncUi();
+        this.onChange('data');
+      },
+      onMessage: (text, tone) => this.toast(text, tone),
+    });
+    this.importsPanel.restore();
+  }
+
+  /** OSM features with the uploads folded in, recomputed only when either moves. */
+  featuresForBuild() {
+    if (!this.cache.features) return null;
+    if (!this.imports.length) return this.cache.features;
+    if (!this.merged) this.merged = applyImports(this.cache.features, this.imports).features;
+    return this.merged;
+  }
+
   /* ================= change pipeline ================= */
 
   onChange(kind) {
@@ -853,6 +893,7 @@ class App {
           features: overpass.parseElements(json.elements || []),
           bytes: overpass.estimateSize(json),
         };
+        this.merged = null;
         this.dataStale = false;
       }
 
@@ -903,7 +944,7 @@ class App {
       type: 'build',
       jobId,
       payload: {
-        features: this.cache.features,
+        features: this.featuresForBuild(),
         settings: JSON.parse(JSON.stringify(this.settings)),
         heightGrid:
           this.settings.terrain.enabled && this.heightGrid

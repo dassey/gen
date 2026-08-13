@@ -120,6 +120,37 @@
       </div>
     </section>
 
+    <!-- Your own data -->
+    <section class="panel" data-panel="imports">
+      <button class="panel-head" type="button" aria-expanded="false">
+        <span class="panel-title">Your own data</span><span class="chev"></span>
+      </button>
+      <div class="panel-body">
+        <p class="hint">
+          OpenStreetMap coverage is patchy outside city centres. Bring your own
+          footprints — most councils and counties publish them, often with real
+          heights.
+        </p>
+
+        <div class="dropzone" id="dropzone" tabindex="0" role="button"
+             aria-label="Add a data file">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 7 8h3v7h4V8h3l-5-5Zm-7 15v2h14v-2H5Z"/></svg>
+          <strong>Drop a file, or choose one</strong>
+          <span>GeoJSON · KML · KMZ · zipped Shapefile</span>
+        </div>
+        <input id="import-input" type="file" multiple hidden
+               accept=".geojson,.json,.kml,.kmz,.zip,application/geo+json,application/json,application/vnd.google-earth.kml+xml">
+
+        <ul class="dataset-list" id="dataset-list"></ul>
+
+        <p class="hint">
+          Nothing is uploaded — files are read in your browser and kept on this
+          device. Projected data needs its <code>.prj</code>, or export as
+          WGS84 / EPSG:4326.
+        </p>
+      </div>
+    </section>
+
     <!-- Route -->
     <section class="panel" data-panel="route">
       <button class="panel-head" type="button" aria-expanded="false">
@@ -375,12 +406,29 @@
       <strong>3MF</strong> for multi-material, or the <strong>per-layer STL</strong> bundle to
       assign filaments manually.</p>
 
-      <h3>4. Buildings are estimates</h3>
+      <h3>4. When the map data is thin, bring your own</h3>
+      <p>OpenStreetMap coverage outside city centres is often machine-traced: every
+      building an identical rectangle, none of them with a height. That is a data
+      problem, not a print problem, and it is usually fixable — most councils and
+      counties publish building footprints on an open-data portal, frequently
+      LiDAR-derived and carrying real heights.</p>
+      <p>Open <strong>Your own data</strong> and drop the file in. GeoJSON, KML, KMZ
+      and zipped Shapefiles all work. Pick which column holds the height and
+      whether it is metres, feet or storeys — the tool guesses, and reports the
+      range it read so you can see at once whether it picked the right one. Set
+      <strong>Replace here</strong> and your footprints take over from OSM's
+      wherever your data covers, leaving the rest of the plate alone.</p>
+      <p>Everything is parsed in your browser and kept on your device. If the data
+      is in a State Plane or UTM grid — most government data is — include the
+      <code>.prj</code> in the ZIP and it will be reprojected; without one the
+      upload is refused rather than dropped in the wrong hemisphere.</p>
+
+      <h3>5. Buildings are estimates</h3>
       <p>OpenStreetMap knows exact heights for some buildings and level counts for many more.
       Where it knows nothing, height is inferred from the building type. Use
       <strong>Height scale</strong> to push the skyline up if it reads flat.</p>
 
-      <h3>5. Printing notes</h3>
+      <h3>6. Printing notes</h3>
       <ul>
         <li>No supports needed — everything sits on a flat base.</li>
         <li>0.12–0.16 mm layers keep the lettering and kerb lines readable.</li>

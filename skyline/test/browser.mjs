@@ -541,6 +541,169 @@ async function installStubs(page, osm) {
     const persisted = await page.evaluate(() => window.skylineForge.settings.nameplate.title);
     ok('settings survive a reload', persisted === 'NEW YORK', `got "${persisted}"`);
 
+    /* ---------- bring your own data ---------- */
+    console.log('\nImporting your own data');
+
+    // A GeoJSON block with per-feature heights, handed straight to the panel.
+    const importResult = await page.evaluate(async (f) => {
+      const app = window.skylineForge;
+      const features = [];
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const lat = f.lat - 0.0016 + r * 0.0004;
+          const lon = f.lon - 0.0020 + c * 0.0005;
+          const d = 0.00018;
+          features.push({
+            type: 'Feature',
+            properties: { BLDG_HT_FT: 20 + ((r * 8 + c) % 11) * 9, ADDRESS: `${r}${c} Main St` },
+            geometry: { type: 'Polygon', coordinates: [[
+              [lon, lat], [lon + d, lat], [lon + d, lat + d], [lon, lat + d], [lon, lat],
+            ]] },
+          });
+        }
+      }
+      const json = JSON.stringify({ type: 'FeatureCollection', features });
+      const file = new File([json], 'county-buildings.geojson', { type: 'application/geo+json' });
+      await app.importsPanel.add([file]);
+      const dataset = app.importsPanel.datasets[app.importsPanel.datasets.length - 1];
+      return {
+        count: dataset.count,
+        part: dataset.mapping.part,
+        heightField: dataset.mapping.heightField,
+        heightUnit: dataset.mapping.heightUnit,
+        nameField: dataset.mapping.nameField,
+        rows: document.querySelectorAll('.dataset').length,
+      };
+    }, FIXTURE);
+
+    ok('the file is parsed', importResult.count === 64, `${importResult.count} shapes`);
+    ok('polygons default to the buildings layer', importResult.part === 'buildings');
+    ok('the height column is guessed', importResult.heightField === 'BLDG_HT_FT',
+      String(importResult.heightField));
+    ok('feet are guessed from the value range', importResult.heightUnit === 'ft',
+      importResult.heightUnit);
+    ok('the name column is guessed', importResult.nameField === 'ADDRESS',
+      String(importResult.nameField));
+    ok('the dataset appears in the panel', importResult.rows === 1);
+
+    await page.waitForTimeout(900);
+    await page.waitForFunction(() => !window.skylineForge.busy, { timeout: 120000 });
+
+    const imported = await page.evaluate(() => {
+      const app = window.skylineForge;
+      const buildings = app.model.parts.find((p) => p.id === 'buildings');
+      const tops = new Set();
+      for (let i = 2; i < buildings.positions.length; i += 3) {
+        tops.add(Math.round(buildings.positions[i] * 4));
+      }
+      return { count: app.model.stats.buildingCount, distinctHeights: tops.size };
+    });
+    ok('imported buildings reach the model', imported.count > 50, `${imported.count} buildings`);
+    ok('their heights vary, unlike a flat OSM suburb',
+      imported.distinctHeights > 8, `${imported.distinctHeights} distinct heights`);
+    await page.screenshot({ path: join(SHOTS, '07-imported.png') });
+
+    // Replace mode has to displace the OSM footprints underneath, so this runs
+    // while there are still OSM buildings there to displace.
+    const modes = await page.evaluate(async () => {
+      const app = window.skylineForge;
+      const id = app.importsPanel.datasets[0].id;
+      const counts = {};
+      for (const mode of ['add', 'replace']) {
+        app.importsPanel.update(id, { mode });
+        await new Promise((r) => setTimeout(r, 900));
+        while (app.busy) await new Promise((r) => setTimeout(r, 120));
+        counts[mode] = app.model.stats.buildingCount;
+      }
+      return counts;
+    });
+    ok('replace drops the OSM buildings underneath',
+      modes.replace < modes.add, `add ${modes.add}, replace ${modes.replace}`);
+
+    // The motivating case: somewhere OSM knows nothing about, where the upload
+    // is the only source of buildings. It also isolates the unit switch, which
+    // Manhattan's towers would otherwise mask by pinning the model height at
+    // the cap.
+    await page.route('**://*/api/interpreter', (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify({ elements: [] }) })
+    );
+    await page.evaluate(() => {
+      const app = window.skylineForge;
+      app.cache = { bbox: null, layers: [], detail: null, features: null };
+      app.merged = null;
+      app.settings.size.areaMetres = 1150; // new bbox, so the query cache misses
+      app.syncUi();
+    });
+    await page.click('#generate-btn');
+    await page.waitForFunction(() => !window.skylineForge.busy, { timeout: 120000 });
+
+    const bare = await page.evaluate(() => ({
+      buildings: window.skylineForge.model.stats.buildingCount,
+      height: window.skylineForge.model.stats.heightMm,
+    }));
+    ok('an upload alone can carry a print where OSM has nothing',
+      bare.buildings === 64, `${bare.buildings} buildings`);
+
+    await page.evaluate(() => {
+      const app = window.skylineForge;
+      app.importsPanel.update(app.importsPanel.datasets[0].id, { heightUnit: 'm' });
+    });
+    await page.waitForTimeout(900);
+    await page.waitForFunction(() => !window.skylineForge.busy, { timeout: 120000 });
+    const afterUnit = await page.evaluate(() => window.skylineForge.model.stats.heightMm);
+    ok('reading the column as metres instead of feet makes the buildings taller',
+      afterUnit > bare.height * 2, `${bare.height.toFixed(1)} -> ${afterUnit.toFixed(1)} mm`);
+
+    // KML, which is what Google Earth produces.
+    const kmlResult = await page.evaluate(async (f) => {
+      const app = window.skylineForge;
+      const ring = [
+        [f.lon - 0.001, f.lat - 0.001], [f.lon + 0.001, f.lat - 0.001],
+        [f.lon + 0.001, f.lat + 0.001], [f.lon - 0.001, f.lat + 0.001],
+        [f.lon - 0.001, f.lat - 0.001],
+      ].map(([lon, lat]) => `${lon},${lat},0`).join(' ');
+      const kml = `<?xml version="1.0" encoding="UTF-8"?>
+        <kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark>
+        <name>Park</name>
+        <ExtendedData><Data name="acres"><value>12</value></Data></ExtendedData>
+        <Polygon><outerBoundaryIs><LinearRing><coordinates>${ring}</coordinates>
+        </LinearRing></outerBoundaryIs></Polygon></Placemark></Document></kml>`;
+      await app.importsPanel.add([new File([kml], 'park.kml')]);
+      const d = app.importsPanel.datasets[app.importsPanel.datasets.length - 1];
+      return { format: d.format, count: d.count, kind: d.kind, name: d.features[0].properties.name };
+    }, FIXTURE);
+    ok('KML is recognised', kmlResult.format === 'KML', kmlResult.format);
+    ok('KML polygons are read', kmlResult.count === 1 && kmlResult.kind === 'area');
+    ok('KML placemark names survive', kmlResult.name === 'Park', String(kmlResult.name));
+
+    // Projected data with no projection must be refused, not silently misplaced.
+    const refusal = await page.evaluate(async () => {
+      const app = window.skylineForge;
+      const json = JSON.stringify({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon',
+          coordinates: [[[850000, 336500], [850020, 336500], [850020, 336520], [850000, 336520], [850000, 336500]]] } }],
+      });
+      const before = app.importsPanel.datasets.length;
+      await app.importsPanel.add([new File([json], 'state-plane.geojson')]);
+      return { added: app.importsPanel.datasets.length - before };
+    });
+    ok('unprojectable data is refused rather than placed in the ocean', refusal.added === 0);
+
+    const storedCount = await page.evaluate(async () => {
+      const { loadDatasets } = await import('./js/data/import/store.js');
+      return (await loadDatasets()).length;
+    });
+    ok('uploads are stored on the device', storedCount === 2, `${storedCount} datasets`);
+
+    await page.evaluate(async () => {
+      const app = window.skylineForge;
+      for (const d of [...app.importsPanel.datasets]) await app.importsPanel.remove(d.id);
+    });
+    await page.waitForTimeout(900);
+    await page.waitForFunction(() => !window.skylineForge.busy, { timeout: 120000 });
+    ok('removing a dataset clears it', (await page.locator('.dataset').count()) === 0);
+
     /* ---------- mobile ---------- */
     console.log('\nMobile layout');
     const phone = await browser.newPage({

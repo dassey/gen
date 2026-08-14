@@ -8,7 +8,8 @@ colours, optionally highlight a route across it, and export a colour 3MF or an
 STL you can drop straight into your slicer.
 
 **→ [Open the tool](https://dassey.github.io/skyline-forge/)** ·
-[Notes for contributors](CLAUDE.md)
+[Notes for contributors](CLAUDE.md) ·
+[How it is built](ARCHITECTURE.md)
 
 ---
 

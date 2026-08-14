@@ -3,6 +3,11 @@
 Read this before changing geometry code. Most of it is things that already went
 wrong once.
 
+Three documents, three jobs. `README.md` is how to *use* it. This file is what
+will *break*. [`ARCHITECTURE.md`](ARCHITECTURE.md) is how to *rebuild* it from
+nothing — the design, the algorithms, the module contracts and the order to
+build them in. If you are new here and the code no longer exists, start there.
+
 ## What is here
 
 **Skyline Forge** — a buildless browser tool that turns OpenStreetMap data into

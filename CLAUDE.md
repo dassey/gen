@@ -12,9 +12,9 @@ Two unrelated things share this repository:
 | `index.html` (root) | "Character Creator V2.0" — predates everything else, untouched, unrelated. |
 | `skyline/` | **Skyline Forge** — the real project. A buildless browser tool that turns OpenStreetMap data into 3D-printable city models. |
 
-GitHub Pages serves the repository root, so the tool lives at `/gen/skyline/`.
-Moving it to the root would replace the Character Creator page — that is a
-product decision, not a technical one.
+GitHub Pages serves the repository root, so the tool lives at
+`/skyline-forge/skyline/`. Moving it to the root would replace the Character
+Creator page — that is a product decision, not a technical one.
 
 ## Working on it
 

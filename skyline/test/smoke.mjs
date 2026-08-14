@@ -96,7 +96,7 @@ function pass(label, detail = '') {
 // Overpass rejects Node's default agent with a 406. Browsers send a real one,
 // so this header exists purely to let the test reach the same endpoint the app
 // does.
-const UA = 'SkylineForge-test/1.0 (https://github.com/dassey/gen)';
+const UA = 'SkylineForge-test/1.0 (https://github.com/dassey/skyline-forge)';
 const CACHE = join(HERE, '.cache');
 
 /**

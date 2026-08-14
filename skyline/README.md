@@ -7,7 +7,7 @@ Search for a place, pick a plate shape, choose which layers you want in which
 colours, optionally highlight a route across it, and export a colour 3MF or an
 STL you can drop straight into your slicer.
 
-**→ [Open the tool](https://dassey.github.io/gen/skyline/)**
+**→ [Open the tool](https://dassey.github.io/skyline-forge/skyline/)**
 
 ---
 

@@ -5,25 +5,22 @@ wrong once.
 
 ## What is here
 
-Two unrelated things share this repository:
+**Skyline Forge** — a buildless browser tool that turns OpenStreetMap data into
+3D-printable city models. It is the whole repository: `index.html` at the root
+is the app, and GitHub Pages serves it at `https://dassey.github.io/skyline-forge/`.
 
-| Path | What |
-|---|---|
-| `index.html` (root) | "Character Creator V2.0" — predates everything else, untouched, unrelated. |
-| `skyline/` | **Skyline Forge** — the real project. A buildless browser tool that turns OpenStreetMap data into 3D-printable city models. |
-
-GitHub Pages serves the repository root, so the tool lives at
-`/skyline-forge/skyline/`. Moving it to the root would replace the Character
-Creator page — that is a product decision, not a technical one.
+It did not always live here. Until August 2026 the app sat in a `skyline/`
+subfolder because the root held an unrelated "Character Creator" page, and the
+repository itself was called `gen`. Both are gone. If you find a stale
+`/gen/` or `/skyline/` path anywhere, it is a leftover — fix it.
 
 ## Working on it
 
 No build step, no bundler, no `npm install` to run the app. Everything is
-vendored in `skyline/vendor/`. ES modules are loaded directly by the browser.
+vendored in `vendor/`. ES modules are loaded directly by the browser.
 
 ```sh
-cd skyline
-npx http-server .. -p 8080     # then http://localhost:8080/skyline/
+npx http-server . -p 8080     # then http://localhost:8080/
 ```
 
 It must be served over HTTP — ES modules and the model worker will not load
@@ -38,7 +35,8 @@ node test/manifold.mjs f  # Diagnostic, not a suite. Reads an exported 3MF.
 npm run lint
 ```
 
-`browser.mjs` needs Playwright (`npm i -D playwright`) and a fixture in
+`browser.mjs` needs Playwright (`npm install` — it is the only dependency the
+repository has, and nothing the app itself ships needs it) and a fixture in
 `test/.cache`, which `smoke.mjs` populates on its first run. `smoke.mjs` caches
 Overpass responses on disk, so only the first run touches the network — delete
 `test/.cache` to refresh.
@@ -137,7 +135,7 @@ apparently off-screen. `.viewport canvas` sets `width/height: 100%`.
 ## Layout
 
 ```
-skyline/js/
+js/
   app.js          state, control binding, the change pipeline
   imports-ui.js   the "Your own data" panel
   viewer.js       three.js preview          mappicker.js  Leaflet plate picker

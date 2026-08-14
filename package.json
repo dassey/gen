@@ -6,7 +6,7 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "serve": "http-server .. -p 8080 -c-1",
+    "serve": "http-server . -p 8080 -c-1",
     "test": "node test/geometry.mjs && node test/import.mjs && node test/smoke.mjs",
     "test:geometry": "node test/geometry.mjs",
     "test:import": "node test/import.mjs",
@@ -14,5 +14,8 @@
     "test:manifold": "node test/manifold.mjs",
     "test:browser": "node test/browser.mjs",
     "lint": "eslint js test --no-config-lookup -c eslint.config.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
   }
 }
